@@ -1,0 +1,1455 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Javier Casero · CV RPG</title>
+<meta name="description" content="El CV de Javier Casero, desarrollador móvil, convertido en un pequeño RPG: recorre el pueblo, habla con la gente y llena tu inventario.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* La interfaz usa la misma paleta que el CV clásico (Android Studio oscuro);
+     el mundo, en cambio, es pixel art luminoso dibujado en canvas. */
+  :root {
+    --bg:         #18191b;
+    --bg-raised:  #1e1f22;
+    --bg-sunk:    #2b2d30;
+    --line:       #393b40;
+    --ink:        #bcbec4;
+    --ink-strong: #dfe1e5;
+    --ink-dim:    #9da0a8;
+    --ink-faint:  #7a7e85;
+    --amber:      #cf8e6d;
+    --amber-dim:  #a8724f;
+    --live:       #6aab73;
+    --blue:       #56a8f5;
+    --cyan:       #2aacb8;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; overscroll-behavior: none; }
+  body { color: var(--ink); font-family: var(--mono); font-size: 14px; -webkit-tap-highlight-color: transparent; }
+  #game { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; cursor: pointer; }
+
+  .btn {
+    font: 500 12px/1 var(--mono);
+    color: var(--ink-strong);
+    background: rgba(30, 31, 34, .9);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--amber-dim); color: var(--amber); }
+  .btn:focus-visible, .choice:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .btn.primary { background: var(--amber); border-color: var(--amber); color: #1e1f22; font-weight: 700; }
+  .btn.primary:hover { background: #dba083; color: #1e1f22; }
+  .btn b { color: var(--amber); font-weight: 700; }
+  .short { display: none; }
+
+  /* ---- HUD ---- */
+  .hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; gap: 6px; align-items: center;
+    padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top));
+    pointer-events: none;
+  }
+  .hud > * { pointer-events: auto; }
+  .hud .spacer { flex: 1; pointer-events: none; }
+  @media (max-width: 640px) {
+    .hud { gap: 4px; padding-left: 8px; padding-right: 8px; }
+    .btn { padding: 7px 7px; font-size: 11px; }
+    .long { display: none; }
+    .short { display: inline; }
+  }
+
+  /* ---- diálogo ---- */
+  #dialog {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: min(720px, calc(100% - 24px));
+    min-height: 118px;
+    background: rgba(30, 31, 34, .97);
+    border: 2px solid var(--amber-dim);
+    border-radius: 8px;
+    box-shadow: 0 0 0 3px rgba(24, 25, 27, .85), 0 18px 40px -16px rgba(0, 0, 0, .8);
+    padding: 12px 16px 14px;
+    cursor: pointer;
+  }
+  #dialog[hidden], #panel[hidden], #title[hidden], #hint[hidden] { display: none; }
+  #dialog .who { font: 700 11.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--amber); margin-bottom: 8px; }
+  #dialog .txt { font: 400 16px/1.5 var(--sans); color: var(--ink-strong); min-height: 48px; }
+  #dialog .txt b { color: #e8b48f; font-weight: 600; }
+  #dialog .txt a, .panel a { color: var(--blue); }
+  #dialog .next { position: absolute; right: 14px; bottom: 8px; color: var(--amber); font-size: 12px; animation: blink 1s steps(2) infinite; }
+  #dialog .next[hidden] { display: none; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .choices { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .choices:empty { display: none; }
+  .choice {
+    font: 500 14px/1.35 var(--sans); text-align: left;
+    color: var(--ink-strong); background: var(--bg-sunk);
+    border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; cursor: pointer;
+  }
+  .choice::before { content: "▸ "; color: var(--amber); }
+  .choice:hover, .choice:focus-visible { border-color: var(--amber-dim); }
+  @media (max-width: 520px) { #dialog .txt { font-size: 15px; } }
+
+  /* ---- paneles ---- */
+  #panel {
+    position: absolute; inset: 0;
+    background: rgba(10, 11, 12, .55);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .panel {
+    position: relative;
+    width: min(580px, 100%);
+    max-height: min(82dvh, 760px);
+    overflow: auto;
+    background: var(--bg-raised);
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 0 0 3px rgba(24, 25, 27, .85), 0 24px 60px -20px rgba(0, 0, 0, .9);
+    padding: 20px 20px 22px;
+  }
+  .panel .x { position: absolute; top: 12px; right: 12px; }
+  .panel h2 { margin: 0 0 4px; font: 700 16px/1.3 var(--mono); color: var(--ink-strong); padding-right: 64px; }
+  .panel .sub { margin: 0 0 16px; font: 400 14px/1.5 var(--sans); color: var(--ink-dim); }
+  .panel h3 { margin: 18px 0 8px; font: 700 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); }
+  .panel p { font: 400 14.5px/1.55 var(--sans); color: var(--ink); margin: 0 0 10px; }
+  .panel p b { color: var(--ink-strong); font-weight: 600; }
+  .rows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+  .rows dt { font: 500 12px/1.6 var(--mono); color: var(--amber); }
+  .rows dd { margin: 0; font: 400 14px/1.5 var(--sans); color: var(--ink-strong); }
+  @media (max-width: 460px) { .rows { grid-template-columns: 1fr; gap: 0; } .rows dd { margin-bottom: 8px; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: 500 12px/1 var(--mono); color: var(--ink-strong); background: var(--bg-sunk); border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .quests { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .quests li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-sunk); font: 400 14px/1.4 var(--sans); color: var(--ink-strong); }
+  .quests li .chk { width: 18px; height: 18px; flex: none; border: 1.5px solid var(--ink-faint); border-radius: 4px; display: grid; place-items: center; font: 700 12px/1 var(--mono); color: #1e1f22; }
+  .quests li.done { color: var(--ink-dim); }
+  .quests li.done .chk { background: var(--live); border-color: var(--live); }
+  .quests li .t { flex: 1; }
+  .quests li .p { font: 500 12px/1 var(--mono); color: var(--amber); }
+  .quests li .btn { padding: 6px 9px; font-size: 11px; }
+  .bar { height: 6px; background: var(--bg-sunk); border-radius: 3px; overflow: hidden; margin: 0 0 14px; }
+  .bar i { display: block; height: 100%; background: var(--live); }
+  .inv { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-sunk); font: 400 13.5px/1.3 var(--sans); color: var(--ink-strong); }
+  .ic { width: 28px; height: 28px; flex: none; border-radius: 5px; display: grid; place-items: center; font: 700 11px/1 var(--mono); color: #18191b; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .22); }
+  .item.locked { opacity: .45; }
+  .item.locked .ic { background: var(--line) !important; color: var(--ink-faint); }
+  .minimap { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; border: 1px solid var(--line); margin-bottom: 12px; cursor: pointer; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font: 400 12px/1 var(--mono); color: var(--ink-dim); margin: 0 0 12px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+
+  /* ---- portada ---- */
+  #title {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+    background: radial-gradient(ellipse at center, rgba(24, 25, 27, .55), rgba(24, 25, 27, .92));
+  }
+  .card { width: min(520px, 100%); text-align: center; }
+  .kicker { font: 700 12px/1 var(--mono); letter-spacing: .24em; color: var(--amber); margin: 0 0 14px; }
+  .card h1 { font: 700 clamp(26px, 6vw, 40px)/1.1 var(--mono); color: var(--ink-strong); margin: 0 0 8px; letter-spacing: -.01em; text-shadow: 0 3px 0 #000; }
+  .card .role { font: 500 13px/1.4 var(--mono); color: var(--live); margin: 0 0 18px; }
+  .card p { font: 400 15.5px/1.55 var(--sans); color: var(--ink); margin: 0 0 22px; }
+  .card .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .card .btn { padding: 12px 16px; font-size: 13px; }
+  .card .ctrl { font: 400 12px/1.5 var(--mono); color: var(--ink-faint); margin: 20px 0 0; }
+
+  #toasts { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+  .toast { font: 500 12.5px/1 var(--mono); color: var(--ink-strong); background: rgba(30, 31, 34, .95); border: 1px solid var(--live); border-radius: 6px; padding: 8px 12px; animation: toast 2.6s ease forwards; }
+  .toast b { color: var(--live); }
+  @keyframes toast { 0% { opacity: 0; transform: translateY(-6px); } 10%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  #hint { position: absolute; left: 50%; transform: translateX(-50%); bottom: max(16px, env(safe-area-inset-bottom)); font: 500 12px/1 var(--mono); color: var(--ink-strong); background: rgba(30, 31, 34, .85); border: 1px solid var(--line); border-radius: 20px; padding: 9px 14px; white-space: nowrap; pointer-events: none; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #dialog .next, .toast { animation: none; }
+  }
+</style>
+<script>
+  /* Mismo idioma que el CV clásico: comparten la clave "cv-lang". */
+  (function () {
+    var l = null;
+    try { l = localStorage.getItem("cv-lang"); } catch (e) {}
+    if (!l) l = /^es\b/i.test(navigator.language || "") ? "es" : "en";
+    document.documentElement.setAttribute("data-lang", l);
+    document.documentElement.lang = l;
+  })();
+</script>
+</head>
+<body>
+<div id="game">
+  <canvas id="c" tabindex="0" aria-label="Mapa del juego"></canvas>
+
+  <header class="hud">
+    <button type="button" class="btn" id="b-quests"><span data-ui="quests"></span> <b id="q-count">0/8</b></button>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="b-map" data-ui="map"></button>
+    <button type="button" class="btn" id="b-sheet" data-ui="sheet"></button>
+    <button type="button" class="btn" id="b-inv"><span class="long" data-ui="inv"></span><span class="short" data-ui="invS"></span></button>
+    <button type="button" class="btn" id="b-lang" data-ui="langBtn"></button>
+    <a class="btn" href="../"><span class="long" data-ui="cv"></span><span class="short" data-ui="cvS"></span></a>
+  </header>
+
+  <div id="toasts" aria-live="polite"></div>
+  <div id="hint" hidden></div>
+
+  <div id="dialog" hidden role="dialog" aria-label="Conversación">
+    <div class="who"></div>
+    <div class="txt" aria-hidden="true"></div>
+    <div class="sr" aria-live="polite"></div>
+    <div class="choices"></div>
+    <div class="next" aria-hidden="true">▼</div>
+  </div>
+
+  <div id="panel" hidden>
+    <div class="panel" role="dialog" aria-modal="true">
+      <button type="button" class="btn x" data-ui="close"></button>
+      <div class="body"></div>
+    </div>
+  </div>
+
+  <div id="title">
+    <div class="card">
+      <p class="kicker" data-ui="kicker"></p>
+      <h1>Javier Casero Hernández</h1>
+      <p class="role" data-ui="role"></p>
+      <p data-ui="intro"></p>
+      <div class="row">
+        <button type="button" class="btn primary" id="b-start"></button>
+        <a class="btn" href="../" data-ui="classic"></a>
+      </div>
+      <p class="ctrl" id="ctrl"></p>
+    </div>
+  </div>
+
+  <noscript>
+    <p style="position:absolute;inset:0;display:grid;place-items:center;font:15px var(--sans);background:var(--bg)">
+      <a href="../" style="color:var(--blue)">Este CV jugable necesita JavaScript. Ver el CV clásico →</a>
+    </p>
+  </noscript>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var root = document.documentElement;
+  var lang = root.getAttribute("data-lang") === "en" ? "en" : "es";
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var touch = window.matchMedia && matchMedia("(pointer: coarse)").matches;
+
+  /* =====================================================================
+     Textos de la interfaz
+     ===================================================================== */
+  var UI = {
+    es: {
+      quests: "Misiones", map: "Mapa", sheet: "Ficha", inv: "Inventario", invS: "Inv.",
+      cv: "CV clásico", cvS: "CV", langBtn: "EN", close: "Cerrar ✕",
+      kicker: "CV · RPG", role: "Desarrollador móvil · Android y Kotlin Multiplatform",
+      intro: "Este CV se juega. Recorre Villa Casero, habla con la gente y llena tu inventario con lo que Javi sabe hacer. Son unos minutos.",
+      start: "▶ Empezar", cont: "▶ Continuar partida", classic: "Prefiero el CV clásico",
+      ctrlKeys: "Flechas o WASD para moverte · Espacio para hablar · M para el mapa",
+      ctrlTouch: "Toca el mapa para moverte · toca a alguien para hablar",
+      hintKeys: "Flechas / WASD · Espacio para hablar", hintTouch: "Toca el mapa para moverte",
+      qTitle: "Misiones", qSub: "Habla con cada personaje para completar el CV.", go: "Ir",
+      reset: "Reiniciar partida", resetQ: "¿Borrar el progreso y empezar de cero?", bonus: "Extra",
+      mapTitle: "Mapa de Villa Casero", mapSub: "Elige un sitio y viaja directo, sin caminar.",
+      lgPend: "Por visitar", lgDone: "Visitado", lgYou: "Tú",
+      invTitle: "Inventario", invSub: "Lo que has ido reuniendo por el pueblo.",
+      gSkill: "Tecnologías y habilidades", gEdu: "Formación", gStamp: "Sellos de clientes", gMisc: "Otros",
+      sheetTitle: "Ficha de personaje", equip: "Equipo principal", bio: "Historia",
+      email: "Email", linkedin: "LinkedIn", pdf: "Descargar PDF", classicCv: "CV clásico",
+      doneTitle: "¡CV completado!",
+      doneP: "Has recorrido toda la carrera de Javi. Queda una última misión, y esta es de verdad: escribirle.",
+      keep: "Seguir paseando", got: "Conseguido", stamp: "Sello",
+      market: "Mercado de clientes"
+    },
+    en: {
+      quests: "Quests", map: "Map", sheet: "Sheet", inv: "Inventory", invS: "Inv.",
+      cv: "Classic CV", cvS: "CV", langBtn: "ES", close: "Close ✕",
+      kicker: "CV · RPG", role: "Mobile developer · Android and Kotlin Multiplatform",
+      intro: "This CV is played. Walk around Casero Town, talk to people and fill your inventory with what Javi can do. It takes a few minutes.",
+      start: "▶ Start", cont: "▶ Continue", classic: "I'd rather see the classic CV",
+      ctrlKeys: "Arrows or WASD to move · Space to talk · M for the map",
+      ctrlTouch: "Tap the map to move · tap someone to talk",
+      hintKeys: "Arrows / WASD · Space to talk", hintTouch: "Tap the map to move",
+      qTitle: "Quests", qSub: "Talk to each character to complete the CV.", go: "Go",
+      reset: "Restart game", resetQ: "Erase your progress and start over?", bonus: "Bonus",
+      mapTitle: "Map of Casero Town", mapSub: "Pick a place and travel straight there.",
+      lgPend: "Not visited", lgDone: "Visited", lgYou: "You",
+      invTitle: "Inventory", invSub: "Everything you've collected around town.",
+      gSkill: "Tech and skills", gEdu: "Education", gStamp: "Client stamps", gMisc: "Other",
+      sheetTitle: "Character sheet", equip: "Main gear", bio: "Backstory",
+      email: "Email", linkedin: "LinkedIn", pdf: "Download PDF", classicCv: "Classic CV",
+      doneTitle: "CV complete!",
+      doneP: "You've walked through Javi's whole career. One last quest left, and this one is real: get in touch.",
+      keep: "Keep exploring", got: "Got", stamp: "Stamp",
+      market: "Client market"
+    }
+  };
+  function U(k) { return UI[lang][k]; }
+  function L(o) { return o == null ? "" : (typeof o === "string" ? o : (o[lang] != null ? o[lang] : o.es)); }
+
+  var EMAIL = "caserojavier3@gmail.com";
+  var LINKEDIN = "https://www.linkedin.com/in/javiercaseroher";
+
+  /* =====================================================================
+     Objetos del inventario
+     ===================================================================== */
+  var ITEMS = {
+    ficha:   { g: "misc",  c: "#cf8e6d", i: "@",  es: "Ficha de personaje", en: "Character sheet" },
+    idiomas: { g: "misc",  c: "#e8c06a", i: "Aa", es: "Idiomas: ES · EN · PT", en: "Languages: ES · EN · PT" },
+    dam:     { g: "edu",   c: "#b39ddb", i: "DA", es: "Técnico Superior DAM · Cesur 2023", en: "Higher Diploma, Cross-Platform Apps · Cesur 2023" },
+    eoi:     { g: "edu",   c: "#b39ddb", i: "EO", es: "EOI · Escuela de Organización Industrial 2023", en: "EOI · Escuela de Organización Industrial 2023" },
+    android: { g: "skill", c: "#6aab73", i: "An", es: "Android SDK", en: "Android SDK" },
+    compose: { g: "skill", c: "#6aab73", i: "JC", es: "Jetpack Compose", en: "Jetpack Compose" },
+    kmp:     { g: "skill", c: "#cf8e6d", i: "KM", es: "Kotlin Multiplatform", en: "Kotlin Multiplatform" },
+    cmp:     { g: "skill", c: "#cf8e6d", i: "CM", es: "Compose Multiplatform", en: "Compose Multiplatform" },
+    dsys:    { g: "skill", c: "#56a8f5", i: "DS", es: "Design Systems", en: "Design Systems" },
+    figma:   { g: "skill", c: "#56a8f5", i: "Fg", es: "Figma · MCP", en: "Figma · MCP" },
+    sonar:   { g: "skill", c: "#2aacb8", i: "SQ", es: "SonarQube", en: "SonarQube" },
+    tests:   { g: "skill", c: "#2aacb8", i: "Ts", es: "Tests unitarios y de UI", en: "Unit and UI tests" },
+    cpp:     { g: "skill", c: "#e06c75", i: "++", es: "Ingeniería inversa · C++ → Kotlin", en: "Reverse engineering · C++ → Kotlin" },
+    lider:   { g: "skill", c: "#e8c06a", i: "LT", es: "Liderazgo técnico", en: "Technical leadership" },
+    cliente: { g: "skill", c: "#e8c06a", i: "CC", es: "Comunicación con cliente", en: "Client communication" },
+    turito:  { g: "skill", c: "#5fc7a0", i: "Tu", es: "Turito · SaaS propio en producción", en: "Turito · own SaaS in production" },
+    llm:     { g: "skill", c: "#9aa3ad", i: "AI", es: "LLMs open-source", en: "Open-source LLMs" },
+    iatools: { g: "skill", c: "#9aa3ad", i: ">_", es: "Claude Code · Codex · Gemini CLI · MCP", en: "Claude Code · Codex · Gemini CLI · MCP" }
+  };
+  var STAMPS = ["eroski", "caprabo", "circlek", "philip", "tap", "h24"];
+
+  /* =====================================================================
+     Personajes y conversaciones
+     Todo sale del CV clásico: si algo cambia allí, se cambia aquí.
+     ===================================================================== */
+  var NPCS = [
+    { id: "guia", x: 8, y: 23, dir: "left",
+      look: { skin: "#e8b48a", hair: "#d7d7d7", shirt: "#6aab73", pants: "#5b4636" },
+      name: { es: "Guía del pueblo", en: "Town guide" },
+      dlg: {
+        es: [
+          "¡Bienvenido a **Villa Casero**! Aquí cada edificio es un trozo del CV de **Javier Casero**, desarrollador móvil.",
+          "Habla con quien tenga un **!** encima. Cada conversación cuenta una etapa de su carrera y te da objetos para el inventario.",
+          "Muévete con las flechas o WASD, o toca el mapa. Habla con Espacio. ¿Con prisa? Abre el **Mapa** y viaja directo a cada sitio.",
+          "Empieza aquí al lado: en la **Casa de Javi** está su ficha de personaje."
+        ],
+        en: [
+          "Welcome to **Casero Town**! Every building here is a piece of **Javier Casero**'s CV. He's a mobile developer.",
+          "Talk to anyone with a **!** over their head. Each conversation covers a stage of his career and gives you items for your inventory.",
+          "Move with the arrow keys or WASD, or tap the map. Talk with Space. In a hurry? Open the **Map** and travel straight to each place.",
+          "Start right next door: **Javi's house** has his character sheet."
+        ]
+      } },
+
+    { id: "perfil", x: 5, y: 22, door: true, quest: "perfil", give: ["ficha"], after: "sheet",
+      name: { es: "Casa de Javi", en: "Javi's house" },
+      dlg: {
+        es: ["Sobre la mesa hay una **ficha de personaje**. La guardas en el inventario."],
+        en: ["There's a **character sheet** on the table. You put it in your inventory."]
+      } },
+
+    { id: "profe", x: 8, y: 9, dir: "down", quest: "academia", give: ["dam", "eoi"],
+      look: { skin: "#d79b72", hair: "#2c1e16", shirt: "#8e6fc4", pants: "#3a3a48", long: true },
+      name: { es: "Profesora", en: "Teacher" },
+      dlg: {
+        es: [
+          "Aquí se formó Javi. En **2023** terminó el **Técnico Superior en Desarrollo de Aplicaciones Multiplataforma** en Cesur.",
+          "Ese mismo año pasó por la **EOI**, la Escuela de Organización Industrial.",
+          "Y también en 2023 empezó a trabajar en apps móviles. Lo que vino después te lo cuentan en la **Torre Magellan**, junto a la plaza."
+        ],
+        en: [
+          "This is where Javi trained. In **2023** he finished the **Higher Diploma in Cross-Platform Application Development** at Cesur.",
+          "That same year he went through **EOI**, the Escuela de Organización Industrial.",
+          "Also in 2023 he started building mobile apps. The rest of the story is at **Magellan Tower**, by the square."
+        ]
+      } },
+
+    { id: "recepcion", x: 17, y: 9, dir: "down", quest: "magellan", give: ["android", "compose", "lider", "cliente"],
+      look: { skin: "#f1c7a5", hair: "#b5562f", shirt: "#2aacb8", pants: "#2b2d30" },
+      name: { es: "Recepcionista", en: "Receptionist" },
+      dlg: {
+        es: [
+          "Bienvenido a **Magellan Partners**. Javi trabaja aquí desde **2023** como desarrollador de aplicaciones móviles.",
+          "Su equipo empezó en **Worldline**, en la unidad MeTS. En **2026** Magellan Partners adquirió esa unidad, y el equipo vino con ella.",
+          "Hace apps para marcas que llegan a mucha gente: **Eroski, Caprabo, Circle K, Philip Morris, Tap on Mobile y H24**. Los tienes en el mercado, al sur de la plaza.",
+          "Y no solo código: **liderazgo técnico**, gestión de grupos y **comunicación con cliente**. Toma, esto es para tu inventario."
+        ],
+        en: [
+          "Welcome to **Magellan Partners**. Javi has worked here since **2023** as a mobile application developer.",
+          "His team started at **Worldline**, in the MeTS unit. In **2026** Magellan Partners acquired that unit, and the team came with it.",
+          "He builds apps for brands that reach a lot of people: **Eroski, Caprabo, Circle K, Philip Morris, Tap on Mobile and H24**. You'll find them at the market, south of the square.",
+          "And it's not just code: **technical leadership**, team management and **client communication**. Here, these are for your inventory."
+        ]
+      } },
+
+    { id: "arquitecta", x: 21, y: 9, dir: "down", quest: "ds", give: ["dsys", "kmp", "cmp", "figma"],
+      look: { skin: "#c48459", hair: "#1b1410", shirt: "#56a8f5", pants: "#3b3f58", long: true },
+      name: { es: "Arquitecta de componentes", en: "Component architect" },
+      dlg: {
+        es: [
+          "¿Ves estos bloques? Son piezas del **Design System** que comparten las apps de retail del grupo.",
+          "Javi lo diseña y lo desarrolla con **Kotlin Multiplatform** y **Compose Multiplatform**: los mismos componentes en Android y en iOS.",
+          "Además lo sincronizó con **Figma a través de MCP**: los componentes de diseño conectados con el código, con asistentes de IA para generarlos y contrastarlos."
+        ],
+        en: [
+          "See these blocks? They're pieces of the **Design System** shared across the group's retail apps.",
+          "Javi designs and builds it with **Kotlin Multiplatform** and **Compose Multiplatform**: the same components on Android and iOS.",
+          "He also synced it with **Figma through MCP**, wiring design components to code and using AI assistants to generate and cross-check them."
+        ]
+      } },
+
+    { id: "eroski", x: 14, y: 21, dir: "down", stamp: "eroski", give: ["sonar", "tests"],
+      look: { skin: "#e9b993", hair: "#5a3a22", shirt: "#d9534f", pants: "#34495e" },
+      name: { es: "Eroski", en: "Eroski" },
+      dlg: {
+        es: ["En nuestro proyecto Javi implantó el **control de calidad del código**.", "**SonarQube**, una batería de **tests** y el seguimiento y la corrección de issues. Aquí tienes nuestro sello."],
+        en: ["On our project Javi set up **code quality control**.", "**SonarQube**, a **test** suite, and tracking and fixing issues. Here's our stamp."]
+      } },
+
+    { id: "caprabo", x: 18, y: 21, dir: "down", stamp: "caprabo",
+      look: { skin: "#c98d63", hair: "#222222", shirt: "#4e9a5b", pants: "#3b3b3b" },
+      name: { es: "Caprabo", en: "Caprabo" },
+      dlg: {
+        es: ["Javi trabajó en nuestra **app de retail**, la del grupo. Toma nuestro sello."],
+        en: ["Javi worked on our **retail app**, the group's one. Take our stamp."]
+      } },
+
+    { id: "circlek", x: 22, y: 21, dir: "down", stamp: "circlek",
+      look: { skin: "#f2cba8", hair: "#8a5a2b", shirt: "#e8913a", pants: "#2f3e4e", long: true },
+      name: { es: "Circle K", en: "Circle K" },
+      dlg: {
+        es: ["Javi hizo **desarrollo de interfaz** para nuestra app de tiendas de conveniencia. Aquí tienes el sello."],
+        en: ["Javi did **interface development** for our convenience store app. Here's the stamp."]
+      } },
+
+    { id: "philip", x: 14, y: 26, dir: "down", stamp: "philip",
+      look: { skin: "#b9805a", hair: "#3a2a1a", shirt: "#5d6d7e", pants: "#2a2a2a" },
+      name: { es: "Philip Morris", en: "Philip Morris" },
+      dlg: {
+        es: ["Javi construyó **pantallas de producto** sobre el Design System compartido. Nuestro sello, para ti."],
+        en: ["Javi built **product screens** on the shared Design System. Our stamp, for you."]
+      } },
+
+    { id: "tap", x: 18, y: 26, dir: "down", stamp: "tap",
+      look: { skin: "#f0c8a0", hair: "#6b3e8a", shirt: "#3fb0a8", pants: "#3a3a48", long: true },
+      name: { es: "Tap on Mobile", en: "Tap on Mobile" },
+      dlg: {
+        es: ["Javi hizo **pantallas e integración** con el sistema de componentes común. Toma, nuestro sello."],
+        en: ["Javi built **screens and integration** with the shared component system. Here, our stamp."]
+      } },
+
+    { id: "h24", x: 22, y: 26, dir: "down", stamp: "h24", give: ["cpp"],
+      look: { skin: "#e5b08a", hair: "#e4e4e4", shirt: "#8e6fc4", pants: "#4a4038" },
+      name: { es: "H24", en: "H24" },
+      dlg: {
+        es: [
+          "Teníamos una aplicación **legacy escrita en C++** y había que migrarla.",
+          { t: "¿Qué crees que hizo Javi?", choices: [
+            { t: "La reescribió desde cero sin mirar el código antiguo", r: "No. Antes de reescribir había que entender lo que ya había. Prueba otra vez." },
+            { t: "Ingeniería inversa del C++ y reescritura en Kotlin", ok: true },
+            { t: "La dejó como estaba, total funcionaba", r: "Tampoco: había que migrarla. Prueba otra vez." }
+          ] },
+          "¡Exacto! **Ingeniería inversa** sobre el código original en C++ y **migración completa a Kotlin**. Toma nuestro sello."
+        ],
+        en: [
+          "We had a **legacy app written in C++** and it had to be migrated.",
+          { t: "What do you think Javi did?", choices: [
+            { t: "Rewrote it from scratch without looking at the old code", r: "No. Before rewriting, you had to understand what was already there. Try again." },
+            { t: "Reverse-engineered the C++ and rewrote it in Kotlin", ok: true },
+            { t: "Left it alone, it worked anyway", r: "Nope: it had to be migrated. Try again." }
+          ] },
+          "Exactly! He **reverse-engineered** the original C++ code and **migrated it fully to Kotlin**. Take our stamp."
+        ]
+      } },
+
+    { id: "encargada", x: 35, y: 23, dir: "down", quest: "turito", give: ["turito"],
+      look: { skin: "#f0c09a", hair: "#e0b84e", shirt: "#5fc7a0", pants: "#36454f", long: true },
+      name: { es: "Encargada del local", en: "Shift manager" },
+      dlg: {
+        es: [
+          "¡Hola! Aquí organizo los turnos con **Turito**, el SaaS que Javi creó por su cuenta. Ya está **en producción**.",
+          "Yo monto el cuadrante, cada trabajador marca su disponibilidad y recibe su turno en el móvil.",
+          "Y el mes se cierra con las **horas reales y el coste ya calculado**. Hay web y **app de iPhone**, planes de suscripción y prueba de 30 días.",
+          "También tiene ocho tutoriales en vídeo y una guía de uso. Échale un vistazo: [turito.es](https://www.turito.es/)"
+        ],
+        en: [
+          "Hi! I run shifts here with **Turito**, the SaaS Javi built on his own. It's already **in production**.",
+          "I build the rota, each worker marks their availability and gets their shift on their phone.",
+          "And the month closes with **real hours and cost already calculated**. There's a web app and an **iPhone app**, subscription plans and a 30-day trial.",
+          "It also comes with eight video tutorials and a user guide. Take a look: [turito.es](https://www.turito.es/)"
+        ]
+      } },
+
+    { id: "bot", x: 35, y: 8, dir: "down", quest: "marwan", give: ["llm", "iatools"],
+      look: { bot: true },
+      name: { es: "Bot de MarwanAI", en: "MarwanAI bot" },
+      dlg: {
+        es: [
+          "BIP BUP. Esto es **MarwanAI**, la empresa que Javi **co-fundó en 2025**.",
+          "Acercamos infraestructura de IA a las empresas: llevamos **modelos de lenguaje open-source** desde la infraestructura hasta el producto final.",
+          "Javi lleva la **capa de aplicación**: que la IA se convierta en interfaces que la gente sabe usar.",
+          "En su día a día trabaja con **Claude Code, Codex, Gemini CLI y MCP** para generar y revisar código. Más en [marwanai.com](https://marwanai.com/)"
+        ],
+        en: [
+          "BEEP BOOP. This is **MarwanAI**, the company Javi **co-founded in 2025**.",
+          "We bring AI infrastructure to companies: we take **open-source language models** from infrastructure all the way to a finished product.",
+          "Javi owns the **application layer**: turning AI into interfaces people actually know how to use.",
+          "Day to day he works with **Claude Code, Codex, Gemini CLI and MCP** to generate and review code. More at [marwanai.com](https://marwanai.com/)"
+        ]
+      } },
+
+    { id: "cartero", x: 35, y: 14, dir: "down", quest: "contacto",
+      look: { skin: "#d9a07a", hair: "#3b2a20", shirt: "#3d6bb3", pants: "#2b2d30", hat: "#3d6bb3" },
+      name: { es: "Cartero", en: "Postal worker" },
+      dlg: function () {
+        var left = QUESTS.filter(function (q) { return q.id !== "contacto" && !questDone(q.id); }).length;
+        var mail = "[" + EMAIL + "](mailto:" + EMAIL + ")", li = "[in/javiercaseroher](" + LINKEDIN + ")";
+        var p = lang === "es"
+          ? ["¿Quieres hablar con Javi? Te dejo sus señas.", "Email: " + mail + " · LinkedIn: " + li + " · Vive en España."]
+          : ["Want to talk to Javi? Here's how to reach him.", "Email: " + mail + " · LinkedIn: " + li + " · Based in Spain."];
+        if (left) p.push(lang === "es"
+          ? "Te quedan **" + left + "** misiones para completar el CV, pero puedes escribirle cuando quieras."
+          : "You have **" + left + "** quests left to complete the CV, but you can write to him any time.");
+        return p;
+      } },
+
+    { id: "viajero", x: 10, y: 12, dir: "down", give: ["idiomas"], bonus: true,
+      look: { skin: "#c68b62", hair: "#4a3020", shirt: "#a8724f", pants: "#4b5a3a", hat: "#7a5230" },
+      name: { es: "Viajero", en: "Traveller" },
+      dlg: {
+        es: ["Vengo de muy lejos. Javi habla **español** (nativo), **inglés** (intermedio, y mejorando) y algo de **portugués** (básico). Até logo!"],
+        en: ["I've come a long way. Javi speaks **Spanish** (native), **English** (intermediate, and improving) and some **Portuguese** (basic). Até logo!"]
+      } }
+  ];
+  var byId = {};
+  NPCS.forEach(function (n) { byId[n.id] = n; });
+
+  var QUESTS = [
+    { id: "perfil",   npc: "perfil",     es: "Visita la casa de Javi", en: "Visit Javi's house" },
+    { id: "academia", npc: "profe",      es: "Pasa por la Academia", en: "Stop by the Academy" },
+    { id: "magellan", npc: "recepcion",  es: "Entra en la Torre Magellan", en: "Enter Magellan Tower" },
+    { id: "ds",       npc: "arquitecta", es: "Conoce el Design System", en: "Meet the Design System" },
+    { id: "clientes", npc: "market",     es: "Consigue los 6 sellos del mercado", en: "Collect the 6 market stamps" },
+    { id: "turito",   npc: "encargada",  es: "Descubre Turito", en: "Discover Turito" },
+    { id: "marwan",   npc: "bot",        es: "Visita el laboratorio de MarwanAI", en: "Visit the MarwanAI lab" },
+    { id: "contacto", npc: "cartero",    es: "Recoge sus señas en Correos", en: "Pick up his contact details at the Post Office" }
+  ];
+
+  /* =====================================================================
+     Estado guardado
+     ===================================================================== */
+  var SAVE_KEY = "cv-rpg-v1";
+  var state = { done: {}, items: [], stamps: [], talked: {}, finished: false, pos: null };
+  try {
+    var raw = localStorage.getItem(SAVE_KEY);
+    if (raw) { var s = JSON.parse(raw); if (s && s.done) state = Object.assign(state, s); }
+  } catch (e) {}
+  function save() {
+    state.pos = [P.x, P.y, P.dir];
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) {}
+  }
+  function questDone(id) {
+    if (id === "clientes") return state.stamps.length >= STAMPS.length;
+    return !!state.done[id];
+  }
+  function doneCount() { return QUESTS.filter(function (q) { return questDone(q.id); }).length; }
+  function has(id) { return state.items.indexOf(id) >= 0; }
+
+  /* =====================================================================
+     El mapa
+     ===================================================================== */
+  var MW = 40, MH = 30, T = 16;
+  var GR = 0, PA = 1, WA = 2, BR = 3, TR = 4, FL = 5;
+  var tile = new Uint8Array(MW * MH), solid = new Uint8Array(MW * MH);
+  function I(x, y) { return y * MW + x; }
+  function inb(x, y) { return x >= 0 && y >= 0 && x < MW && y < MH; }
+  function rect(x, y, w, h, t) {
+    for (var j = y; j < y + h; j++) for (var i = x; i < x + w; i++) if (inb(i, j)) tile[I(i, j)] = t;
+  }
+  function hash(x, y, s) {
+    var h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s || 0, 1442695041);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  rect(0, 0, MW, MH, GR);
+  rect(1, 15, 38, 2, PA);            // camino principal
+  rect(6, 9, 1, 6, PA);              // a la Academia
+  rect(16, 9, 8, 6, PA);             // plaza
+  rect(3, 23, 9, 1, PA); rect(11, 17, 1, 6, PA);   // a casa
+  rect(12, 18, 13, 10, PA);          // mercado
+  rect(29, 4, 1, 23, PA); rect(29, 9, 5, 1, PA); rect(33, 8, 1, 1, PA);
+  rect(33, 14, 1, 1, PA); rect(29, 23, 5, 1, PA);
+  rect(27, 0, 2, MH, WA);            // río
+  rect(27, 15, 2, 2, BR);            // puente
+  for (var bx = 0; bx < MW; bx++) { if (tile[I(bx, 0)] === GR) tile[I(bx, 0)] = TR; if (tile[I(bx, MH - 1)] === GR) tile[I(bx, MH - 1)] = TR; }
+  for (var by = 0; by < MH; by++) { tile[I(0, by)] = TR; tile[I(MW - 1, by)] = TR; }
+  [[11, 3], [12, 5], [11, 7], [13, 2], [25, 3], [25, 5], [25, 7], [24, 2], [2, 11], [3, 13], [2, 26], [4, 27],
+   [7, 26], [9, 28], [10, 20], [11, 26], [25, 19], [25, 23], [26, 27], [31, 17], [36, 17], [37, 26], [31, 27],
+   [34, 27], [37, 10], [14, 12], [24, 12], [1, 6], [38, 20], [9, 2]].forEach(function (p) {
+    if (tile[I(p[0], p[1])] === GR) tile[I(p[0], p[1])] = TR;
+  });
+  for (var fy = 1; fy < MH - 1; fy++) for (var fx = 1; fx < MW - 1; fx++)
+    if (tile[I(fx, fy)] === GR && hash(fx, fy, 7) < 0.07) tile[I(fx, fy)] = FL;
+  for (var k = 0; k < MW * MH; k++) solid[k] = (tile[k] === TR || tile[k] === WA) ? 1 : 0;
+
+  var BUILDINGS = [
+    { id: "home",   npc: "perfil",    x: 3,  y: 19, w: 6, h: 4, door: 5,  roof: "#b5523b", wall: "#efe2c6", label: { es: "Casa de Javi", en: "Javi's house" } },
+    { id: "acad",   npc: "profe",     x: 3,  y: 4,  w: 7, h: 5, door: 6,  roof: "#4a6fa5", wall: "#e9e4d8", label: { es: "Academia", en: "Academy" } },
+    { id: "tower",  npc: "recepcion", x: 15, y: 2,  w: 9, h: 7, door: 19, roof: "#3b4450", wall: "#c9d2dc", tall: true, label: { es: "Torre Magellan", en: "Magellan Tower" } },
+    { id: "lab",    npc: "bot",       x: 30, y: 3,  w: 7, h: 5, door: 33, roof: "#2f3b46", wall: "#d6dde3", lab: true, label: { es: "Laboratorio MarwanAI", en: "MarwanAI Lab" } },
+    { id: "post",   npc: "cartero",   x: 31, y: 11, w: 5, h: 3, door: 33, roof: "#c0392b", wall: "#f2e6cf", label: { es: "Correos", en: "Post office" } },
+    { id: "turito", npc: "encargada", x: 30, y: 19, w: 7, h: 4, door: 33, roof: "#2f8f6f", wall: "#f4ead6", label: { es: "Turito", en: "Turito" } }
+  ];
+  var STALLS = [
+    { npc: "eroski",  x: 13, y: 19, c: "#d9534f", label: "Eroski" },
+    { npc: "caprabo", x: 17, y: 19, c: "#4e9a5b", label: "Caprabo" },
+    { npc: "circlek", x: 21, y: 19, c: "#e8913a", label: "Circle K" },
+    { npc: "philip",  x: 13, y: 24, c: "#5d6d7e", label: "Philip Morris" },
+    { npc: "tap",     x: 17, y: 24, c: "#3fb0a8", label: "Tap on Mobile" },
+    { npc: "h24",     x: 21, y: 24, c: "#8e6fc4", label: "H24" }
+  ];
+  var FOUNTAIN = { x: 19, y: 11, w: 2, h: 2 };
+  var CRATES = { x: 22, y: 9, npc: "arquitecta" };
+  var objAt = {};   // casilla -> id del personaje relacionado (para hacer clic en edificios)
+  function block(x, y, w, h, npc) {
+    for (var j = y; j < y + h; j++) for (var i = x; i < x + w; i++) { solid[I(i, j)] = 1; if (npc) objAt[I(i, j)] = npc; }
+  }
+  BUILDINGS.forEach(function (b) { block(b.x, b.y, b.w, b.h, b.npc); });
+  STALLS.forEach(function (s) { block(s.x, s.y, 3, 2, s.npc); });
+  block(FOUNTAIN.x, FOUNTAIN.y, 2, 2);
+  block(CRATES.x, CRATES.y, 1, 1, CRATES.npc);
+
+  /* =====================================================================
+     Pixel art: se dibuja todo una vez en un canvas fuera de pantalla
+     ===================================================================== */
+  function shade(hex, a) {
+    var n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    function f(c) { return Math.round(a < 0 ? c * (1 + a) : c + (255 - c) * a); }
+    return "rgb(" + f(r) + "," + f(g) + "," + f(b) + ")";
+  }
+  function px(g, c, x, y, w, h) { g.fillStyle = c; g.fillRect(x, y, w || 1, h || 1); }
+
+  var mapCanvas = document.createElement("canvas");
+  mapCanvas.width = MW * T; mapCanvas.height = MH * T;
+  var mg = mapCanvas.getContext("2d");
+
+  function drawGrass(g, x, y, X, Y) {
+    px(g, "#5b9a4a", X, Y, T, T);
+    for (var k = 0; k < 6; k++) {
+      var hx = Math.floor(hash(x, y, k) * 15), hy = Math.floor(hash(x, y, k + 20) * 15);
+      px(g, k % 2 ? "#4f8a40" : "#69ab56", X + hx, Y + hy, 1, 2);
+    }
+  }
+  function drawPath(g, x, y, X, Y) {
+    px(g, "#d6c195", X, Y, T, T);
+    for (var k = 0; k < 7; k++) {
+      var hx = Math.floor(hash(x, y, k + 40) * 15), hy = Math.floor(hash(x, y, k + 60) * 15);
+      px(g, k % 2 ? "#c5ad7f" : "#e2d0a8", X + hx, Y + hy, 2, 1);
+    }
+  }
+  function drawWater(g, x, y, X, Y) {
+    px(g, "#3d7fc9", X, Y, T, T);
+    px(g, "#5b9be0", X + Math.floor(hash(x, y, 3) * 10), Y + 4, 5, 1);
+    px(g, "#5b9be0", X + Math.floor(hash(x, y, 4) * 10), Y + 11, 4, 1);
+    var lt = inb(x - 1, y) ? tile[I(x - 1, y)] : WA, rt = inb(x + 1, y) ? tile[I(x + 1, y)] : WA;
+    if (lt !== WA && lt !== BR) { px(g, "#7a6a4a", X, Y, 2, T); px(g, "#a9d1f5", X + 2, Y, 1, T); }
+    if (rt !== WA && rt !== BR) { px(g, "#7a6a4a", X + 14, Y, 2, T); px(g, "#a9d1f5", X + 13, Y, 1, T); }
+  }
+  function drawBridge(g, x, y, X, Y) {
+    px(g, "#3d7fc9", X, Y, T, T);
+    px(g, "#a8743f", X, Y, T, T);
+    for (var i = 0; i < T; i += 4) px(g, "#87592d", X + i, Y, 1, T);
+    if (y === 15) { px(g, "#6b4423", X, Y, T, 2); px(g, "#c48f55", X, Y + 2, T, 1); }
+    if (y === 16) { px(g, "#6b4423", X, Y + 14, T, 2); }
+  }
+  var CANOPY = [[5, 6], [3, 10], [2, 12], [2, 12], [2, 12], [2, 12], [2, 12], [3, 10], [4, 8], [6, 4]];
+  function drawTree(g, x, y, X, Y) {
+    drawGrass(g, x, y, X, Y);
+    px(g, "rgba(0,0,0,.2)", X + 3, Y + 13, 10, 3);
+    px(g, "#6b4423", X + 6, Y + 10, 4, 5);
+    px(g, "#4f3018", X + 6, Y + 10, 1, 5);
+    for (var r = 0; r < CANOPY.length; r++) px(g, "#2f6e36", X + CANOPY[r][0], Y + r, CANOPY[r][1], 1);
+    px(g, "#3f8d45", X + 4, Y + 2, 5, 3); px(g, "#3f8d45", X + 3, Y + 4, 3, 2);
+    px(g, "#58a75a", X + 5, Y + 2, 2, 1);
+    px(g, "#245a2a", X + 9, Y + 6, 3, 2); px(g, "#245a2a", X + 6, Y + 8, 3, 1);
+  }
+  var FLOWER = ["#f4e04d", "#ffffff", "#e66b8a", "#a9c9ff"];
+  function drawFlowers(g, x, y, X, Y) {
+    drawGrass(g, x, y, X, Y);
+    for (var k = 0; k < 3; k++) {
+      var hx = 2 + Math.floor(hash(x, y, k + 80) * 11), hy = 2 + Math.floor(hash(x, y, k + 90) * 11);
+      var c = FLOWER[Math.floor(hash(x, y, k + 100) * FLOWER.length)];
+      px(g, c, hx + X - 1, hy + Y, 3, 1); px(g, c, hx + X, hy + Y - 1, 1, 3); px(g, "#f2a33a", hx + X, hy + Y, 1, 1);
+    }
+  }
+  function drawWindow(g, X, Y, lab) {
+    px(g, "#4a4f57", X, Y, 8, 9);
+    px(g, lab ? "#7fe0ea" : "#a9d6f5", X + 1, Y + 1, 6, 7);
+    px(g, "#ffffff", X + 2, Y + 2, 1, 2);
+    px(g, "#4a4f57", X + 4, Y + 1, 1, 7);
+  }
+  function drawBuilding(g, b) {
+    var X = b.x * T, Y = b.y * T, W = b.w * T, H = b.h * T;
+    var roofH = b.tall ? 22 : Math.round(H * 0.46);
+    px(g, "rgba(0,0,0,.22)", X + 2, Y + H, W, 3);
+    px(g, b.wall, X, Y + roofH, W, H - roofH);
+    px(g, shade(b.wall, -0.2), X, Y + H - 2, W, 2);
+    px(g, shade(b.wall, -0.08), X, Y + roofH, W, 2);
+    px(g, b.roof, X - 1, Y, W + 2, roofH);
+    for (var r = Y + 4; r < Y + roofH - 1; r += 4) px(g, shade(b.roof, -0.14), X - 1, r, W + 2, 1);
+    px(g, shade(b.roof, 0.22), X - 1, Y, W + 2, 1);
+    px(g, shade(b.roof, -0.38), X - 1, Y + roofH - 1, W + 2, 2);
+    if (b.lab) {   // antena y panel en el tejado
+      px(g, "#7a838d", X + W - 12, Y - 7, 1, 8); px(g, "#2aacb8", X + W - 13, Y - 9, 3, 3);
+      px(g, "#1f2a33", X + 6, Y + 4, 20, 8); px(g, "#2aacb8", X + 7, Y + 5, 18, 1); px(g, "#2aacb8", X + 7, Y + 8, 12, 1);
+    }
+    var doorX = b.door * T;
+    for (var wy = Y + roofH + 5; wy + 9 <= Y + H - 3; wy += 16) {
+      for (var i = 0; i < b.w; i++) {
+        var tx = X + i * T;
+        if (tx === doorX && wy + 9 > Y + H - 16) continue;
+        drawWindow(g, tx + 4, wy, b.lab);
+      }
+    }
+    px(g, shade(b.wall, -0.45), doorX + 2, Y + H - 15, 12, 15);
+    px(g, "#7a4a26", doorX + 3, Y + H - 14, 10, 14);
+    px(g, "#6b4423", doorX + 8, Y + H - 14, 1, 14);
+    px(g, "#e0c060", doorX + 10, Y + H - 7, 1, 2);
+    px(g, "#cfb98f", doorX + 1, Y + H - 1, 14, 1);
+  }
+  function drawStall(g, s) {
+    var X = s.x * T, Y = s.y * T, W = 3 * T;
+    px(g, "rgba(0,0,0,.2)", X + 2, Y + 32, W - 2, 3);
+    px(g, "#6b4423", X + 2, Y + 8, 2, 24); px(g, "#6b4423", X + W - 4, Y + 8, 2, 24);
+    px(g, "#9a6a36", X + 1, Y + 18, W - 2, 14);
+    px(g, "#b9844a", X + 1, Y + 18, W - 2, 2);
+    px(g, "#7d5228", X + 1, Y + 30, W - 2, 2);
+    var goods = ["#e74c3c", "#f1c40f", "#2ecc71", "#e67e22", "#9b59b6", "#ecf0f1"];
+    for (var i = 0; i < 6; i++) px(g, goods[(i + s.x) % goods.length], X + 5 + i * 7, Y + 14, 4, 4);
+    for (var j = 0; j < W; j += 6) {
+      px(g, s.c, X + j, Y, 3, 10);
+      px(g, "#f5efe2", X + j + 3, Y, 3, 10);
+      px(g, s.c, X + j, Y + 10, 3, 2);
+      px(g, "#f5efe2", X + j + 3, Y + 10, 3, 1);
+    }
+    px(g, shade(s.c, -0.3), X, Y, W, 1);
+  }
+  function drawFountain(g, f) {
+    var X = f.x * T, Y = f.y * T;
+    px(g, "rgba(0,0,0,.18)", X + 2, Y + 29, 30, 3);
+    px(g, "#9aa0a6", X + 2, Y + 4, 28, 26); px(g, "#9aa0a6", X, Y + 8, 32, 18);
+    px(g, "#c3c8cd", X + 2, Y + 4, 28, 2);
+    px(g, "#4a8fd8", X + 4, Y + 8, 24, 18);
+    px(g, "#6aa8ea", X + 6, Y + 10, 8, 1); px(g, "#6aa8ea", X + 16, Y + 20, 8, 1);
+    px(g, "#c3c8cd", X + 13, Y + 10, 6, 10);
+    px(g, "#dfeefe", X + 15, Y + 4, 2, 7);
+  }
+  function drawCrates(g, c) {
+    var X = c.x * T, Y = c.y * T;
+    [["#56a8f5", 1, 8, 7], ["#cf8e6d", 8, 8, 7], ["#6aab73", 4, 1, 8]].forEach(function (b) {
+      px(g, "#1b1d22", X + b[1] - 1, Y + b[2] - 1, b[3] + 2, b[3] + 2);
+      px(g, b[0], X + b[1], Y + b[2], b[3], b[3]);
+      px(g, "rgba(255,255,255,.35)", X + b[1], Y + b[2], b[3], 1);
+      px(g, "rgba(0,0,0,.25)", X + b[1] + 2, Y + b[2] + 2, b[3] - 4, b[3] - 4);
+    });
+  }
+
+  for (var my = 0; my < MH; my++) for (var mx = 0; mx < MW; mx++) {
+    var X0 = mx * T, Y0 = my * T, t0 = tile[I(mx, my)];
+    if (t0 === GR) drawGrass(mg, mx, my, X0, Y0);
+    else if (t0 === PA) drawPath(mg, mx, my, X0, Y0);
+    else if (t0 === WA) drawWater(mg, mx, my, X0, Y0);
+    else if (t0 === BR) drawBridge(mg, mx, my, X0, Y0);
+    else if (t0 === TR) drawTree(mg, mx, my, X0, Y0);
+    else if (t0 === FL) drawFlowers(mg, mx, my, X0, Y0);
+  }
+  BUILDINGS.forEach(function (b) { drawBuilding(mg, b); });
+  STALLS.forEach(function (s) { drawStall(mg, s); });
+  drawFountain(mg, FOUNTAIN);
+  drawCrates(mg, CRATES);
+
+  /* ---- personajes: se generan a demanda y se cachean ---- */
+  var spriteCache = {};
+  function sprite(key, look, dir, frame) {
+    var id = key + dir + frame;
+    if (spriteCache[id]) return spriteCache[id];
+    var c = document.createElement("canvas"); c.width = c.height = 16;
+    var g = c.getContext("2d");
+    var side = dir === "left" || dir === "right";
+    if (look.bot) drawBot(g, dir, frame);
+    else drawPerson(g, look, dir, frame, side);
+    outline(g);
+    px(g, "rgba(0,0,0,0)", 0, 0);
+    g.globalCompositeOperation = "destination-over";
+    px(g, "rgba(0,0,0,.25)", 4, 14, 8, 2); px(g, "rgba(0,0,0,.25)", 3, 14, 10, 1);
+    g.globalCompositeOperation = "source-over";
+    if (dir === "left") {
+      var f = document.createElement("canvas"); f.width = f.height = 16;
+      var fg = f.getContext("2d"); fg.translate(16, 0); fg.scale(-1, 1); fg.drawImage(c, 0, 0); c = f;
+    }
+    spriteCache[id] = c;
+    return c;
+  }
+  function drawPerson(g, l, dir, frame, side) {
+    var shoe = "#2a2522", ink = "#1f1a17";
+    if (!side) {
+      var lo = frame === 1 ? 1 : 0, ro = frame === 2 ? 1 : 0;
+      px(g, l.pants, 5, 11, 2, 2 - lo); px(g, shoe, 5, 13 - lo, 2, 1);
+      px(g, l.pants, 9, 11, 2, 2 - ro); px(g, shoe, 9, 13 - ro, 2, 1);
+      px(g, l.shirt, 4, 7, 8, 4);
+      px(g, shade(l.shirt, -0.18), 4, 10, 8, 1);
+      px(g, l.shirt, 3, 7 + lo, 1, 3); px(g, l.skin, 3, 10 + lo, 1, 1);
+      px(g, l.shirt, 12, 7 + ro, 1, 3); px(g, l.skin, 12, 10 + ro, 1, 1);
+    } else {
+      var a = frame === 1 ? 1 : frame === 2 ? -1 : 0;
+      px(g, shade(l.pants, -0.2), 7 - a, 11, 2, 2); px(g, shoe, 7 - a, 13, 2, 1);
+      px(g, l.pants, 7 + a, 11, 2, 2); px(g, shoe, 7 + a, 13, 3, 1);
+      px(g, l.shirt, 5, 7, 6, 4);
+      px(g, shade(l.shirt, -0.18), 5, 10, 6, 1);
+      px(g, shade(l.shirt, -0.12), 7 + a, 7, 2, 3); px(g, l.skin, 7 + a, 10, 2, 1);
+    }
+    px(g, l.skin, 4, 1, 8, 6);
+    if (dir === "down") {
+      px(g, l.hair, 4, 1, 8, 2); px(g, l.hair, 4, 3, 1, 1); px(g, l.hair, 11, 3, 1, 1);
+      px(g, ink, 6, 4, 1, 2); px(g, ink, 9, 4, 1, 2);
+      px(g, "rgba(230,110,100,.45)", 5, 6, 1, 1); px(g, "rgba(230,110,100,.45)", 10, 6, 1, 1);
+      if (l.long) { px(g, l.hair, 4, 3, 1, 5); px(g, l.hair, 11, 3, 1, 5); }
+    } else if (dir === "up") {
+      px(g, l.hair, 4, 1, 8, 6);
+      if (l.long) px(g, l.hair, 4, 7, 8, 2);
+    } else {
+      px(g, l.hair, 4, 1, 8, 2); px(g, l.hair, 4, 3, 3, 3);
+      px(g, ink, 10, 4, 1, 2);
+      if (l.long) px(g, l.hair, 4, 3, 3, 5);
+    }
+    if (l.hat) {
+      px(g, l.hat, 4, 0, 8, 2);
+      if (dir === "down") px(g, shade(l.hat, -0.25), 3, 2, 10, 1);
+      else if (dir !== "up") px(g, shade(l.hat, -0.25), 6, 2, 7, 1);
+    }
+  }
+  function drawBot(g, dir, frame) {
+    var b = frame === 1 ? 1 : 0;
+    px(g, "#7a838d", 7, 0 + b, 1, 2); px(g, "#2aacb8", 7, 0 + b, 1, 1);
+    px(g, "#aab3bd", 4, 2 + b, 8, 6);
+    px(g, "#c9d0d7", 4, 2 + b, 8, 1);
+    if (dir === "down") { px(g, "#1f2a33", 5, 4 + b, 6, 2); px(g, "#4fe3f0", 6, 4 + b, 1, 1); px(g, "#4fe3f0", 9, 4 + b, 1, 1); }
+    else if (dir !== "up") { px(g, "#1f2a33", 8, 4 + b, 4, 2); px(g, "#4fe3f0", 10, 4 + b, 1, 1); }
+    px(g, "#8b949e", 4, 8, 8, 4);
+    if (dir !== "up") px(g, "#4fe3f0", 7, 9, 2, 2);
+    px(g, "#8b949e", 3, 8, 1, 3); px(g, "#8b949e", 12, 8, 1, 3);
+    px(g, "#555c66", 5, 12, 6, 2);
+  }
+  function outline(g) {
+    var d = g.getImageData(0, 0, 16, 16), a = d.data, out = [];
+    for (var y = 0; y < 16; y++) for (var x = 0; x < 16; x++) {
+      if (a[(y * 16 + x) * 4 + 3]) continue;
+      var near = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(function (o) {
+        var nx = x + o[0], ny = y + o[1];
+        return nx >= 0 && ny >= 0 && nx < 16 && ny < 16 && a[(ny * 16 + nx) * 4 + 3] > 200;
+      });
+      if (near) out.push([x, y]);
+    }
+    out.forEach(function (p) { px(g, "#1b1d22", p[0], p[1]); });
+  }
+
+  /* =====================================================================
+     Jugador, cámara y movimiento por casillas
+     ===================================================================== */
+  var PLAYER_LOOK = { skin: "#f1c39b", hair: "#3b2a20", shirt: "#cf8e6d", pants: "#2b3a55" };
+  var P = { x: 5, y: 23, dir: "down", moving: false, fx: 0, fy: 0, tx: 0, ty: 0, prog: 0, anim: 0, path: null, goal: null, mark: null };
+  if (state.pos && inb(state.pos[0], state.pos[1]) && !solid[I(state.pos[0], state.pos[1])]) {
+    P.x = state.pos[0]; P.y = state.pos[1]; P.dir = state.pos[2] || "down";
+  }
+  P.px = P.x * T; P.py = P.y * T;
+  var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  var SPEED = 6.5;   // casillas por segundo
+
+  function npcAt(x, y) {
+    for (var i = 0; i < NPCS.length; i++) if (NPCS[i].x === x && NPCS[i].y === y) return NPCS[i];
+    return null;
+  }
+  function walkable(x, y) { return inb(x, y) && !solid[I(x, y)] && !npcAt(x, y); }
+  function dirTo(fx, fy, tx, ty) {
+    var dx = tx - fx, dy = ty - fy;
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+    return dy > 0 ? "down" : "up";
+  }
+  function tryStep(dir) {
+    P.dir = dir;
+    var d = DIRS[dir], nx = P.x + d[0], ny = P.y + d[1];
+    if (!walkable(nx, ny)) return false;
+    P.moving = true; P.fx = P.x; P.fy = P.y; P.tx = nx; P.ty = ny;
+    hideHint();
+    return true;
+  }
+
+  function bfs(isGoal) {
+    var prev = new Int32Array(MW * MH).fill(-2), q = [I(P.x, P.y)], head = 0;
+    prev[q[0]] = -1;
+    while (head < q.length) {
+      var cur = q[head++], cx = cur % MW, cy = (cur / MW) | 0;
+      if (isGoal(cx, cy)) {
+        var path = [];
+        for (var c = cur; prev[c] !== -1; c = prev[c]) path.unshift([c % MW, (c / MW) | 0]);
+        return path;
+      }
+      for (var k in DIRS) {
+        var nx = cx + DIRS[k][0], ny = cy + DIRS[k][1];
+        if (!inb(nx, ny) || prev[I(nx, ny)] !== -2 || !walkable(nx, ny)) continue;
+        prev[I(nx, ny)] = cur; q.push(I(nx, ny));
+      }
+    }
+    return null;
+  }
+  function goTo(tx, ty) {
+    var p = bfs(function (x, y) { return x === tx && y === ty; });
+    if (p) { P.path = p; P.goal = null; P.mark = { x: tx, y: ty, t: 0 }; }
+  }
+  function goTalk(n) {
+    var p = bfs(function (x, y) { return Math.abs(x - n.x) + Math.abs(y - n.y) === 1; });
+    if (p) { P.path = p; P.goal = n; P.mark = null; }
+  }
+
+  /* ---- entrada ---- */
+  var held = [];
+  var KEYMAP = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", w: "up", s: "down", a: "left", d: "right", W: "up", S: "down", A: "left", D: "right" };
+  function blocked() { return !titleEl.hidden || !dialogEl.hidden || !panelEl.hidden; }
+
+  window.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    var onControl = e.target.closest && e.target.closest("button, a");
+
+    if (!panelEl.hidden) { if (k === "Escape") { closePanel(); e.preventDefault(); } return; }
+    if (!titleEl.hidden) return;
+
+    if (!dialogEl.hidden) {
+      if (D.choicesShown) {
+        var btns = Array.prototype.slice.call(choicesEl.querySelectorAll("button"));
+        var at = btns.indexOf(document.activeElement);
+        if (k === "ArrowDown" || k === "ArrowUp") {
+          var nx = at < 0 ? 0 : (at + (k === "ArrowDown" ? 1 : btns.length - 1)) % btns.length;
+          btns[nx].focus(); e.preventDefault();
+        }
+        return;
+      }
+      if (k === " " || k === "Enter" || k === "e" || k === "E" || k === "z" || k === "Z") {
+        if (onControl && k === "Enter" && !dialogEl.contains(e.target)) return;
+        e.preventDefault(); advance();
+      }
+      return;
+    }
+
+    if (KEYMAP[k]) {
+      e.preventDefault();
+      var d = KEYMAP[k];
+      if (held.indexOf(d) < 0) held.push(d);
+      return;
+    }
+    if (k === " " || k === "e" || k === "E" || k === "z" || k === "Z" || (k === "Enter" && !onControl)) {
+      e.preventDefault(); interact(); return;
+    }
+    if (k === "m" || k === "M") openPanel("map");
+    else if (k === "c" || k === "C") openPanel("sheet");
+    else if (k === "i" || k === "I") openPanel("inv");
+    else if (k === "q" || k === "Q") openPanel("quests");
+  });
+  window.addEventListener("keyup", function (e) {
+    var d = KEYMAP[e.key];
+    if (d) held = held.filter(function (h) { return h !== d; });
+  });
+  window.addEventListener("blur", function () { held = []; });
+
+  function interact() {
+    var d = DIRS[P.dir], n = npcAt(P.x + d[0], P.y + d[1]);
+    if (n) talk(n);
+  }
+
+  /* =====================================================================
+     Diálogos
+     ===================================================================== */
+  var dialogEl = document.getElementById("dialog");
+  var whoEl = dialogEl.querySelector(".who"), txtEl = dialogEl.querySelector(".txt");
+  var srEl = dialogEl.querySelector(".sr"), choicesEl = dialogEl.querySelector(".choices");
+  var nextEl = dialogEl.querySelector(".next");
+  var D = { npc: null, pages: [], i: 0, typing: false, nodes: [], texts: [], ni: 0, ci: 0, acc: 0, retry: false, choicesShown: false, onEnd: null };
+
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function fmt(s) {
+    return esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, t, h) {
+        return '<a href="' + h + '"' + (/^https?:/.test(h) ? ' target="_blank" rel="noopener"' : "") + ">" + t + "</a>";
+      });
+  }
+  function pagesFor(n) { return typeof n.dlg === "function" ? n.dlg() : n.dlg[lang]; }
+
+  function talk(n) {
+    if (n.look && !n.door) n.dir = dirTo(n.x, n.y, P.x, P.y);
+    P.dir = dirTo(P.x, P.y, n.x, n.y);
+    P.path = null; P.goal = null; held = [];
+    D.npc = n; D.pages = pagesFor(n); D.i = 0; D.retry = false;
+    dialogEl.hidden = false; hideHint();
+    showPage(true);
+  }
+  function showPage(animate, text) {
+    var pg = D.pages[D.i];
+    if (typeof pg === "string") pg = { t: pg };
+    whoEl.textContent = L(D.npc.name);
+    var t = text || pg.t;
+    txtEl.innerHTML = fmt(t);
+    srEl.textContent = txtEl.textContent;
+    choicesEl.innerHTML = ""; D.choicesShown = false;
+    nextEl.hidden = true;
+    var w = document.createTreeWalker(txtEl, NodeFilter.SHOW_TEXT), tn;
+    D.nodes = []; while ((tn = w.nextNode())) D.nodes.push(tn);
+    D.texts = D.nodes.map(function (x) { return x.data; });
+    if (animate && !reduce) {
+      D.nodes.forEach(function (x) { x.data = ""; });
+      D.ni = 0; D.ci = 0; D.acc = 0; D.typing = true;
+    } else finishType();
+  }
+  function stepType(dt) {
+    D.acc += dt * 62;
+    while (D.acc >= 1 && D.typing) {
+      D.acc -= 1;
+      var n = D.nodes[D.ni];
+      if (!n) { finishType(); break; }
+      if (D.ci < D.texts[D.ni].length) { D.ci++; n.data = D.texts[D.ni].slice(0, D.ci); }
+      else { D.ni++; D.ci = 0; }
+    }
+  }
+  function finishType() {
+    D.nodes.forEach(function (x, i) { x.data = D.texts[i]; });
+    D.typing = false;
+    var pg = D.pages[D.i];
+    if (pg && pg.choices && !D.retry) {
+      D.choicesShown = true;
+      pg.choices.forEach(function (c) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "choice"; b.textContent = c.t;
+        b.addEventListener("click", function (e) { e.stopPropagation(); choose(c); });
+        choicesEl.appendChild(b);
+      });
+      var first = choicesEl.querySelector("button"); if (first) first.focus();
+    } else nextEl.hidden = false;
+  }
+  function choose(c) {
+    if (c.ok) { D.i++; showPage(true); }
+    else { D.retry = true; showPage(true, c.r); }
+  }
+  function advance() {
+    if (D.typing) { finishType(); return; }
+    if (D.choicesShown) return;
+    if (D.retry) { D.retry = false; showPage(true); return; }
+    D.i++;
+    if (D.i >= D.pages.length) { endDialog(); return; }
+    showPage(true);
+  }
+  function endDialog() {
+    dialogEl.hidden = true;
+    var n = D.npc; D.npc = null;
+    canvas.focus({ preventScroll: true });
+    reward(n);
+  }
+  dialogEl.addEventListener("click", function (e) {
+    if (e.target.closest("a, button")) return;
+    advance();
+  });
+
+  function reward(n) {
+    var got = [];
+    (n.give || []).forEach(function (id) { if (!has(id)) { state.items.push(id); got.push(L(ITEMS[id])); } });
+    if (n.stamp && state.stamps.indexOf(n.stamp) < 0) { state.stamps.push(n.stamp); got.push(U("stamp") + " · " + L(n.name)); }
+    state.talked[n.id] = 1;
+    if (n.quest) state.done[n.quest] = 1;
+    got.forEach(function (g, i) { setTimeout(function () { toast(g); }, i * 260); });
+    save(); updateHud();
+    if (n.id === "guia") showHint();
+    if (n.after === "sheet") openPanel("sheet");
+    else if (doneCount() === QUESTS.length && !state.finished) { state.finished = true; save(); openPanel("done"); }
+  }
+
+  var toastsEl = document.getElementById("toasts");
+  function toast(text) {
+    var t = document.createElement("div");
+    t.className = "toast"; t.innerHTML = "<b>+</b> " + esc(text);
+    toastsEl.appendChild(t);
+    setTimeout(function () { t.remove(); }, 2700);
+  }
+
+  /* =====================================================================
+     Paneles: misiones, mapa, ficha, inventario y final
+     ===================================================================== */
+  var panelEl = document.getElementById("panel"), panelBody = panelEl.querySelector(".body");
+  var panelKind = null, panelReturn = null;
+
+  function travel(id) {
+    var n = id === "market" ? byId[STAMPS.filter(function (s) { return state.stamps.indexOf(s) < 0; })[0] || "eroski"] : byId[id];
+    var spots = [[0, 1], [-1, 0], [1, 0], [0, -1]];
+    for (var i = 0; i < spots.length; i++) {
+      var x = n.x + spots[i][0], y = n.y + spots[i][1];
+      if (walkable(x, y)) {
+        P.x = x; P.y = y; P.px = x * T; P.py = y * T; P.moving = false; P.path = null; P.goal = null; P.mark = null;
+        closePanel();
+        talk(n);
+        return;
+      }
+    }
+  }
+  function questRow(q) {
+    var done = questDone(q.id), extra = "";
+    if (q.id === "clientes") extra = '<span class="p">' + state.stamps.length + "/" + STAMPS.length + "</span>";
+    return '<li class="' + (done ? "done" : "") + '"><span class="chk">' + (done ? "✓" : "") + '</span><span class="t">' +
+      esc(L(q)) + "</span>" + extra + '<button type="button" class="btn" data-go="' + q.npc + '">' + U("go") + "</button></li>";
+  }
+  var RENDER = {
+    quests: function () {
+      var n = doneCount();
+      var bonus = byId.viajero;
+      return "<h2>" + U("qTitle") + " · " + n + "/" + QUESTS.length + "</h2><p class=sub>" + U("qSub") + "</p>" +
+        '<div class="bar"><i style="width:' + (n / QUESTS.length * 100) + '%"></i></div>' +
+        '<ul class="quests">' + QUESTS.map(questRow).join("") + "</ul>" +
+        "<h3>" + U("bonus") + "</h3>" +
+        '<ul class="quests">' + questRow({ id: "_b", npc: "viajero", es: "Habla con el viajero", en: "Talk to the traveller" })
+          .replace('class=""', 'class="' + (state.talked[bonus.id] ? "done" : "") + '"')
+          .replace('<span class="chk"></span>', '<span class="chk">' + (state.talked[bonus.id] ? "✓" : "") + "</span>") + "</ul>" +
+        '<div class="links"><button type="button" class="btn" data-act="reset">' + U("reset") + "</button></div>";
+    },
+    map: function () {
+      var places = [["perfil", BUILDINGS[0].label], ["profe", BUILDINGS[1].label], ["recepcion", BUILDINGS[2].label],
+        ["arquitecta", { es: "Design System", en: "Design System" }], ["market", { es: U("market"), en: U("market") }],
+        ["encargada", BUILDINGS[5].label], ["bot", BUILDINGS[3].label], ["cartero", BUILDINGS[4].label], ["viajero", byId.viajero.name]];
+      return "<h2>" + U("mapTitle") + "</h2><p class=sub>" + U("mapSub") + "</p>" +
+        '<canvas class="minimap" width="' + MW * T + '" height="' + MH * T + '"></canvas>' +
+        '<div class="legend"><span><i style="background:#f4c430"></i>' + U("lgPend") + '</span><span><i style="background:#6aab73"></i>' +
+        U("lgDone") + '</span><span><i style="background:#56a8f5"></i>' + U("lgYou") + "</span></div>" +
+        '<ul class="quests">' + places.map(function (p) {
+          var done = p[0] === "market" ? questDone("clientes") : !!state.talked[p[0]];
+          return '<li class="' + (done ? "done" : "") + '"><span class="chk">' + (done ? "✓" : "") + '</span><span class="t">' +
+            esc(L(p[1])) + '</span><button type="button" class="btn" data-go="' + p[0] + '">' + U("go") + "</button></li>";
+        }).join("") + "</ul>";
+    },
+    sheet: function () {
+      var es = lang === "es";
+      var rows = es ? [
+        ["Nombre", "Javier Casero Hernández"],
+        ["Clase", "Desarrollador móvil · Android y Kotlin Multiplatform"],
+        ["Gremio", "Magellan Partners (antes Worldline MeTS) · desde 2023"],
+        ["Facción", "MarwanAI · co-fundador · desde 2025"],
+        ["Proyecto", "Turito · SaaS propio en producción"],
+        ["Origen", "España"],
+        ["Idiomas", "Español nativo · Inglés intermedio · Portugués básico"]
+      ] : [
+        ["Name", "Javier Casero Hernández"],
+        ["Class", "Mobile developer · Android and Kotlin Multiplatform"],
+        ["Guild", "Magellan Partners (formerly Worldline MeTS) · since 2023"],
+        ["Faction", "MarwanAI · co-founder · since 2025"],
+        ["Project", "Turito · own SaaS in production"],
+        ["Origin", "Spain"],
+        ["Languages", "Spanish native · English intermediate · Portuguese basic"]
+      ];
+      var bio = es
+        ? "<p>Construye aplicaciones móviles para marcas que llegan a mucha gente. Desarrolla el <b>Design System</b> que comparten las apps de retail del grupo, con <b>Kotlin Multiplatform</b> y <b>Compose Multiplatform</b> sobre Android e iOS.</p>" +
+          "<p>Le interesa el sitio donde la arquitectura se nota en la interfaz: componentes reutilizables, código que aguanta y pantallas que se entienden solas.</p>"
+        : "<p>He builds mobile apps for brands that reach a lot of people. He develops the <b>Design System</b> shared across the group's retail apps, with <b>Kotlin Multiplatform</b> and <b>Compose Multiplatform</b> on Android and iOS.</p>" +
+          "<p>He's drawn to the place where architecture becomes visible in the interface: reusable components, code that holds up, and screens that explain themselves.</p>";
+      var gear = ["Kotlin", "Compose Multiplatform", "Jetpack Compose", "Android SDK", "Design Systems", "SonarQube"];
+      return "<h2>" + U("sheetTitle") + "</h2><p class=sub>Javier Casero Hernández</p>" +
+        '<dl class="rows">' + rows.map(function (r) { return "<dt>" + r[0] + "</dt><dd>" + esc(r[1]) + "</dd>"; }).join("") + "</dl>" +
+        "<h3>" + U("equip") + '</h3><div class="chips">' + gear.map(function (g) { return '<span class="chip">' + g + "</span>"; }).join("") + "</div>" +
+        "<h3>" + U("bio") + "</h3>" + bio + contactLinks();
+    },
+    inv: function () {
+      var groups = [["skill", U("gSkill")], ["edu", U("gEdu")], ["misc", U("gMisc")]];
+      var html = "<h2>" + U("invTitle") + " · " + (state.items.length + state.stamps.length) + "/" + (Object.keys(ITEMS).length + STAMPS.length) +
+        "</h2><p class=sub>" + U("invSub") + "</p>";
+      groups.forEach(function (g) {
+        var ids = Object.keys(ITEMS).filter(function (id) { return ITEMS[id].g === g[0]; });
+        html += "<h3>" + g[1] + '</h3><div class="inv">' + ids.map(function (id) {
+          var it = ITEMS[id], own = has(id);
+          return '<div class="item' + (own ? "" : " locked") + '"><span class="ic" style="background:' + it.c + '">' + (own ? esc(it.i) : "?") +
+            "</span><span>" + (own ? esc(L(it)) : "???") + "</span></div>";
+        }).join("") + "</div>";
+      });
+      html += "<h3>" + U("gStamp") + " · " + state.stamps.length + "/" + STAMPS.length + '</h3><div class="inv">' + STAMPS.map(function (id) {
+        var own = state.stamps.indexOf(id) >= 0, st = STALLS.filter(function (s) { return s.npc === id; })[0];
+        return '<div class="item' + (own ? "" : " locked") + '"><span class="ic" style="background:' + st.c + '">' + (own ? "✓" : "?") +
+          "</span><span>" + (own ? esc(st.label) : "???") + "</span></div>";
+      }).join("") + "</div>";
+      return html;
+    },
+    done: function () {
+      return "<h2>" + U("doneTitle") + "</h2><p class=sub>" + U("doneP") + "</p>" +
+        '<div class="inv">' + ["kmp", "cmp", "dsys", "cpp", "turito", "llm"].map(function (id) {
+          var it = ITEMS[id];
+          return '<div class="item"><span class="ic" style="background:' + it.c + '">' + esc(it.i) + "</span><span>" + esc(L(it)) + "</span></div>";
+        }).join("") + "</div>" + contactLinks(true);
+    }
+  };
+  function contactLinks(withKeep) {
+    return '<div class="links">' +
+      '<a class="btn primary" href="mailto:' + EMAIL + '">' + U("email") + " · " + EMAIL + "</a>" +
+      '<a class="btn" href="' + LINKEDIN + '" target="_blank" rel="noopener">' + U("linkedin") + " ↗</a>" +
+      '<a class="btn" href="../">' + U("classicCv") + "</a>" +
+      '<a class="btn" href="../#pdf">' + U("pdf") + "</a>" +
+      (withKeep ? '<button type="button" class="btn" data-act="close">' + U("keep") + "</button>" : "") +
+      "</div>";
+  }
+  function drawMinimap() {
+    var mm = panelBody.querySelector(".minimap");
+    if (!mm) return;
+    var g = mm.getContext("2d");
+    g.drawImage(mapCanvas, 0, 0);
+    function dot(x, y, c) {
+      g.fillStyle = "#1b1d22"; g.beginPath(); g.arc(x * T + 8, y * T + 8, 9, 0, 7); g.fill();
+      g.fillStyle = c; g.beginPath(); g.arc(x * T + 8, y * T + 8, 6.5, 0, 7); g.fill();
+    }
+    NPCS.forEach(function (n) {
+      if (n.id === "guia") return;
+      dot(n.x, n.y, state.talked[n.id] ? "#6aab73" : "#f4c430");
+    });
+    dot(P.x, P.y, "#56a8f5");
+  }
+  function openPanel(kind) {
+    if (!titleEl.hidden || !dialogEl.hidden) return;
+    held = []; P.path = null; P.goal = null;
+    panelKind = kind;
+    panelReturn = document.activeElement;
+    panelBody.innerHTML = RENDER[kind]();
+    panelEl.hidden = false;
+    drawMinimap();
+    var f = panelBody.querySelector("[data-go], a, button") || panelEl.querySelector(".x");
+    panelEl.querySelector(".x").focus();
+  }
+  function closePanel() {
+    panelEl.hidden = true; panelKind = null;
+    canvas.focus({ preventScroll: true });
+  }
+  panelEl.addEventListener("click", function (e) {
+    if (e.target === panelEl) { closePanel(); return; }
+    var go = e.target.closest("[data-go]");
+    if (go) { travel(go.getAttribute("data-go")); return; }
+    var act = e.target.closest("[data-act]");
+    if (act && act.getAttribute("data-act") === "close") closePanel();
+    if (act && act.getAttribute("data-act") === "reset" && confirm(U("resetQ"))) {
+      try { localStorage.removeItem(SAVE_KEY); } catch (err) {}
+      state = { done: {}, items: [], stamps: [], talked: {}, finished: false, pos: null };
+      P.x = 5; P.y = 23; P.px = P.x * T; P.py = P.y * T; P.dir = "down";
+      NPCS.forEach(function (n) { if (n.look) n.dir = n.id === "guia" ? "left" : "down"; });
+      updateHud(); closePanel();
+    }
+  });
+  panelEl.querySelector(".x").addEventListener("click", closePanel);
+
+  /* =====================================================================
+     HUD, idioma y portada
+     ===================================================================== */
+  var titleEl = document.getElementById("title"), hintEl = document.getElementById("hint");
+  var startBtn = document.getElementById("b-start");
+  var hintShown = false;
+
+  function updateHud() { document.getElementById("q-count").textContent = doneCount() + "/" + QUESTS.length; }
+  function applyLang() {
+    root.setAttribute("data-lang", lang); root.lang = lang;
+    document.querySelectorAll("[data-ui]").forEach(function (el) { el.textContent = U(el.getAttribute("data-ui")); });
+    document.getElementById("b-lang").setAttribute("aria-label", lang === "es" ? "Switch to English" : "Cambiar a español");
+    startBtn.textContent = Object.keys(state.talked).length ? U("cont") : U("start");
+    document.getElementById("ctrl").textContent = touch ? U("ctrlTouch") : U("ctrlKeys");
+    hintEl.textContent = touch ? U("hintTouch") : U("hintKeys");
+    canvas.setAttribute("aria-label", lang === "es" ? "Mapa del juego" : "Game map");
+    document.title = "Javier Casero · CV RPG";
+    if (panelKind) { panelBody.innerHTML = RENDER[panelKind](); drawMinimap(); }
+    if (!dialogEl.hidden && D.npc) { D.pages = pagesFor(D.npc); D.retry = false; showPage(false); }
+    updateHud();
+  }
+  document.getElementById("b-lang").addEventListener("click", function () {
+    lang = lang === "es" ? "en" : "es";
+    try { localStorage.setItem("cv-lang", lang); } catch (e) {}
+    applyLang();
+    this.blur(); canvas.focus({ preventScroll: true });
+  });
+  document.getElementById("b-quests").addEventListener("click", function () { openPanel("quests"); });
+  document.getElementById("b-map").addEventListener("click", function () { openPanel("map"); });
+  document.getElementById("b-sheet").addEventListener("click", function () { openPanel("sheet"); });
+  document.getElementById("b-inv").addEventListener("click", function () { openPanel("inv"); });
+
+  startBtn.addEventListener("click", function () {
+    titleEl.hidden = true;
+    canvas.focus({ preventScroll: true });
+    if (!Object.keys(state.talked).length) talk(byId.guia);
+  });
+  function showHint() { if (hintShown) return; hintShown = true; hintEl.hidden = false; }
+  function hideHint() { hintEl.hidden = true; }
+
+  /* =====================================================================
+     Render
+     ===================================================================== */
+  var canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+  var W = 0, H = 0, dpr = 1, S = 1, camX = 0, camY = 0;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 3);
+    W = Math.floor(canvas.clientWidth * dpr); H = Math.floor(canvas.clientHeight * dpr);
+    canvas.width = W; canvas.height = H;
+    // En horizontal caben ~16×11 casillas; en un móvil en vertical manda el ancho (~11 casillas).
+    S = Math.max(1, Math.round(H > W ? W / (T * 11) : Math.min(W / (T * 16), H / (T * 11))));
+    ctx.imageSmoothingEnabled = false;
+  }
+  window.addEventListener("resize", resize);
+
+  canvas.addEventListener("pointerdown", function (e) {
+    // con un diálogo abierto, tocar en cualquier sitio lo hace avanzar
+    if (!dialogEl.hidden && titleEl.hidden && panelEl.hidden) { e.preventDefault(); advance(); return; }
+    if (blocked()) return;
+    var r = canvas.getBoundingClientRect();
+    var wx = ((e.clientX - r.left) * dpr + camX) / S, wy = ((e.clientY - r.top) * dpr + camY) / S;
+    var tx = Math.floor(wx / T), ty = Math.floor(wy / T);
+    if (!inb(tx, ty)) return;
+    hideHint();
+    var n = npcAt(tx, ty) || npcAt(tx, ty + 1);
+    if (!n && objAt[I(tx, ty)]) n = byId[objAt[I(tx, ty)]];
+    if (n) {
+      if (Math.abs(n.x - P.x) + Math.abs(n.y - P.y) === 1 && !P.moving) talk(n);
+      else goTalk(n);
+      return;
+    }
+    if (walkable(tx, ty)) goTo(tx, ty);
+  });
+
+  function update(dt) {
+    if (D.typing) stepType(dt);
+    if (P.mark) { P.mark.t += dt; if (P.mark.t > 1.2 || (P.x === P.mark.x && P.y === P.mark.y && !P.moving)) P.mark = null; }
+
+    if (P.moving) {
+      P.prog += dt * SPEED; P.anim += dt;
+      if (P.prog >= 1) {
+        var left = P.prog - 1;
+        P.x = P.tx; P.y = P.ty; P.moving = false; P.prog = 0;
+        if (!blocked() && nextStep()) P.prog = Math.min(left, 0.9);
+        else save();
+      }
+    } else if (!blocked()) nextStep();
+
+    if (P.moving) {
+      P.px = (P.fx + (P.tx - P.fx) * P.prog) * T;
+      P.py = (P.fy + (P.ty - P.fy) * P.prog) * T;
+    } else { P.px = P.x * T; P.py = P.y * T; P.anim = 0; }
+  }
+  function nextStep() {
+    var d = held[held.length - 1];
+    if (d) { P.path = null; P.goal = null; P.mark = null; return tryStep(d); }
+    if (P.path && P.path.length) {
+      var nx = P.path.shift();
+      if (tryStep(dirTo(P.x, P.y, nx[0], nx[1]))) return true;
+      P.path = null; P.goal = null; return false;
+    }
+    if (P.goal) { var g = P.goal; P.goal = null; P.path = null; talk(g); }
+    return false;
+  }
+
+  function draw(time) {
+    var ts = T * S, worldW = MW * ts, worldH = MH * ts;
+    camX = worldW <= W ? -(W - worldW) / 2 : Math.max(0, Math.min(worldW - W, P.px * S + ts / 2 - W / 2));
+    camY = worldH <= H ? -(H - worldH) / 2 : Math.max(0, Math.min(worldH - H, P.py * S + ts / 2 - H / 2));
+    camX = Math.round(camX); camY = Math.round(camY);
+
+    ctx.fillStyle = "#2f6e36"; ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(mapCanvas, -camX, -camY, worldW, worldH);
+
+    // brillos del agua
+    if (!reduce) {
+      var x0 = Math.max(0, Math.floor(camX / ts)), x1 = Math.min(MW - 1, Math.floor((camX + W) / ts));
+      var y0 = Math.max(0, Math.floor(camY / ts)), y1 = Math.min(MH - 1, Math.floor((camY + H) / ts));
+      ctx.fillStyle = "rgba(200,230,255,.55)";
+      for (var ty = y0; ty <= y1; ty++) for (var tx = x0; tx <= x1; tx++) {
+        if (tile[I(tx, ty)] !== WA) continue;
+        var o = Math.floor((time / 180 + hash(tx, ty, 9) * 16) % 16);
+        ctx.fillRect(tx * ts + ((o + 3) % 12 + 2) * S - camX, ty * ts + (7 + (o > 8 ? 1 : 0)) * S - camY, 3 * S, S);
+      }
+      var sp = Math.floor(time / 140) % 3;
+      ctx.fillStyle = "rgba(255,255,255,.8)";
+      ctx.fillRect((FOUNTAIN.x * T + 14 + sp) * S - camX, (FOUNTAIN.y * T + 3 + sp) * S - camY, S, S);
+    }
+
+    if (P.mark) {
+      ctx.strokeStyle = "rgba(255,255,255," + (0.9 - P.mark.t * 0.6) + ")"; ctx.lineWidth = Math.max(1, S / 2);
+      ctx.strokeRect(P.mark.x * ts - camX + S * 2, P.mark.y * ts - camY + S * 2, ts - S * 4, ts - S * 4);
+    }
+
+    // personajes ordenados por profundidad
+    var list = NPCS.filter(function (n) { return !n.door; }).map(function (n) { return { n: n, y: n.y * T }; });
+    list.push({ p: true, y: P.py });
+    list.sort(function (a, b) { return a.y - b.y; });
+    var frame = P.moving ? [1, 0, 2, 0][Math.floor(P.anim * 9) % 4] : 0;
+    list.forEach(function (e) {
+      var img, x, y;
+      if (e.p) { img = sprite("player", PLAYER_LOOK, P.dir, frame); x = P.px; y = P.py; }
+      else { img = sprite(e.n.id, e.n.look, e.n.dir, 0); x = e.n.x * T; y = e.n.y * T; }
+      ctx.drawImage(img, Math.round(x * S - camX), Math.round((y - 3) * S - camY), ts, ts);
+    });
+
+    // «!» sobre quien aún no ha hablado contigo
+    var bob = reduce ? 0 : Math.round(Math.sin(time / 220) * 1.5);
+    NPCS.forEach(function (n) {
+      if (state.talked[n.id]) return;
+      var bxp = n.x * T + 5, byp = n.y * T - (n.door ? 6 : 15) + bob;
+      var X = bxp * S - camX, Y = byp * S - camY;
+      if (X < -ts || Y < -ts || X > W || Y > H) return;
+      ctx.fillStyle = "#1b1d22"; ctx.fillRect(X - S, Y - S, 8 * S, 11 * S);
+      ctx.fillStyle = "#f4c430"; ctx.fillRect(X, Y, 6 * S, 9 * S);
+      ctx.fillStyle = "#1b1d22"; ctx.fillRect(X + 2 * S, Y + S, 2 * S, 4 * S); ctx.fillRect(X + 2 * S, Y + 6 * S, 2 * S, 2 * S);
+    });
+
+    // carteles en resolución de pantalla, para que se lean nítidos
+    var fs = Math.round(11 * dpr);
+    ctx.font = "600 " + fs + "px 'JetBrains Mono', ui-monospace, monospace";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    function label(text, wx, wy, accent) {
+      var X = wx * S - camX, Y = wy * S - camY;
+      if (X < -200 * dpr || X > W + 200 * dpr || Y < -40 || Y > H + 40) return;
+      var w = ctx.measureText(text).width + 14 * dpr, h = fs + 10 * dpr;
+      ctx.fillStyle = "rgba(24,25,27,.86)";
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(X - w / 2, Y - h / 2, w, h, 4 * dpr); else ctx.rect(X - w / 2, Y - h / 2, w, h);
+      ctx.fill();
+      ctx.fillStyle = accent || "#dfe1e5"; ctx.fillText(text, X, Y + dpr * 0.5);
+    }
+    BUILDINGS.forEach(function (b) { label(L(b.label), (b.x + b.w / 2) * T, b.y * T - 2); });
+    STALLS.forEach(function (s) { label(s.label, (s.x + 1.5) * T, s.y * T - 2); });
+    label(U("market"), 18.5 * T, 17.4 * T, "#cf8e6d");
+  }
+
+  var last = 0;
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000 || 0); last = now;
+    update(dt);
+    draw(now);
+    requestAnimationFrame(loop);
+  }
+
+  resize();
+  applyLang();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

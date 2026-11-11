@@ -16,6 +16,13 @@ desde Google Fonts.
   solo en el idioma activo.
 - Respeta `prefers-reduced-motion`: sin animaciones para quien las tenga desactivadas.
 
+## CV jugable
+
+`juego/index.html` es el mismo CV convertido en un pequeño RPG (javicas20.github.io/juego/):
+un pueblo en pixel art donde cada personaje cuenta una etapa y te da objetos para el inventario.
+También es un solo archivo sin dependencias. Los textos salen del CV clásico: si cambias algo
+allí, cámbialo también en `NPCS` e `ITEMS` dentro del juego. El progreso se guarda en el navegador.
+
 ## Editarlo
 
 Se edita `index.html` directamente. Al hacer push a `main`, GitHub Pages lo publica solo.

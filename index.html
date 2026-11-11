@@ -82,6 +82,8 @@
     cursor: pointer;
   }
   .ghost:hover { color: var(--amber); border-color: var(--amber-dim); }
+  a.ghost { text-decoration: none; }
+  .ghost.play { color: var(--amber); border-color: var(--amber-dim); }
 
   /* ---- menú de secciones ---- */
   .tabs {
@@ -304,6 +306,7 @@
     <span class="lamp" aria-hidden="true"></span>
     <span class="host">javier@casero</span>
     <span class="spacer"></span>
+    <a class="ghost play" href="juego/"><span class="es">▶ Jugar</span><span class="en">▶ Play</span></a>
     <button type="button" class="ghost" id="lang"><span class="es">EN</span><span class="en">ES</span></button>
     <button type="button" class="ghost" id="pdf"><span class="es">Descargar PDF</span><span class="en">Download PDF</span></button>
   </header>
@@ -632,6 +635,12 @@
     });
     setTimeout(function () { window.print(); show(activa); }, 120);
   });
+
+  /* El CV jugable enlaza aquí con #pdf para descargar el PDF directamente. */
+  if (location.hash === "#pdf") {
+    history.replaceState(null, "", location.pathname);
+    setTimeout(function () { document.getElementById("pdf").click(); }, 400);
+  }
 
   /* ---- el subtítulo se escribe solo ----
      El texto vive en el HTML: si no hay JS, o si el usuario pide menos
